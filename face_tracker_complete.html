@@ -93,14 +93,43 @@
         .controls {
             margin-top: 20px;
             text-align: center;
-        }
-
-        .status {
+        }        .status {
             background: rgba(0, 0, 0, 0.5);
             padding: 10px 20px;
             border-radius: 25px;
             font-size: 0.9em;
             margin-top: 15px;
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+
+        .filter-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1em;
+            font-weight: bold;
+        }
+
+        .filter-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .filter-btn.active {
+            background: rgba(255, 255, 255, 0.9);
+            color: #667eea;
+            border-color: white;
         }
 
         @media (max-width: 700px) {
@@ -111,10 +140,15 @@
         }
     </style>
 </head>
-<body>
-    <div class="header">
+<body>    <div class="header">
         <h1>🎓 Virtueller Studentenhut</h1>
         <p>Bewegen Sie Ihren Kopf und sehen Sie, wie der Hut realistisch mitfolgt!</p>
+    </div>
+
+    <div class="filter-buttons">
+        <button class="filter-btn active" onclick="changeFilter('hut.png', this)">🎓 Studentenhut</button>
+        <button class="filter-btn" onclick="changeFilter('alex.png', this)">🤖 Alex</button>
+        <button class="filter-btn" onclick="changeFilter('crown.png', this)">👑 Krone</button>
     </div>
 
     <div class="camera-container">
@@ -145,15 +179,26 @@
 
         // Canvas-Dimensionen setzen
         canvasElement.width = 640;
-        canvasElement.height = 480;
-
-        // Hut-Bild laden
+        canvasElement.height = 480;        // Hut-Bild laden
         const hatImage = new Image();
-        hatImage.src = 'alex.png';
+        hatImage.src = 'hut.png';
         
         let isHatLoaded = false;
         let isCameraReady = false;
         let isFaceMeshReady = false;
+        let currentFilter = 'hut.png';
+
+        // Filter wechseln
+        function changeFilter(filterName, buttonElement) {
+            currentFilter = filterName;
+            hatImage.src = filterName;
+            
+            // Button-Status aktualisieren
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            buttonElement.classList.add('active');
+            
+            updateStatus(`Filter gewechselt zu: ${filterName}`);
+        }
 
         // Status-Updates
         function updateStatus(message) {
@@ -173,10 +218,8 @@
             isHatLoaded = true;
             updateStatus('Hut-Bild geladen...');
             checkIfReady();
-        };
-
-        hatImage.onerror = () => {
-            updateStatus('❌ Fehler: hut.png konnte nicht geladen werden!');
+        };        hatImage.onerror = () => {
+            updateStatus(`❌ Fehler: ${currentFilter} konnte nicht geladen werden!`);
         };
 
         // MediaPipe Face Mesh initialisieren
@@ -221,60 +264,68 @@
 
             // Gesichtserkennung und Hut-Platzierung
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-
-                // Wichtige Gesichtspunkte definieren
+                const landmarks = results.multiFaceLandmarks[0];                // Wichtige Gesichtspunkte definieren
                 const forehead = landmarks[10];          // Stirnmitte (Hauptankerpunkt)
                 const leftTemple = landmarks[234];       // Linke Schläfe
                 const rightTemple = landmarks[454];      // Rechte Schläfe
                 const leftEyeOuter = landmarks[33];      // Äußerer linker Augenwinkel
                 const rightEyeOuter = landmarks[263];    // Äußerer rechter Augenwinkel
+                const leftEyeCenter = landmarks[468];    // Linkes Augenzentrum
+                const rightEyeCenter = landmarks[473];   // Rechtes Augenzentrum
                 const noseTip = landmarks[1];            // Nasenspitze
                 const chin = landmarks[152];             // Kinn
 
-                // 1. Kopfneigung berechnen (für Hut-Rotation)
+                // FIXER ANKERPUNKT: Mittleres Drittel zwischen Stirn und Augen
+                const eyeCenterY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
+                const hatAnchorY = forehead.y + (eyeCenterY - forehead.y) * 0.33; // 1/3 von Stirn zu Augen
+                const hatAnchorX = (leftTemple.x + rightTemple.x) / 2; // Mittig zwischen Schläfen
+                
+                const hatAnchorPoint = {
+                    x: hatAnchorX,
+                    y: hatAnchorY
+                };// 1. Kopfneigung berechnen (für Hut-Rotation)
                 const eyeAngle = calculateAngle(leftEyeOuter, rightEyeOuter);
                 
-                // 2. Kopfgröße bestimmen (für Hut-Skalierung)
+                // 2. Vor-/Rückwärts-Neigung des Kopfes berechnen
+                const noseToForeheadAngle = calculateAngle(noseTip, forehead);
+                const headTiltVertical = noseToForeheadAngle - Math.PI/2; // Normalisiert auf 0 bei gerader Haltung
+                
+                // 3. Kopfgröße bestimmen (für Hut-Skalierung)
                 const headWidth = calculateDistance(leftTemple, rightTemple, canvasElement.width, canvasElement.height);
-                const headHeight = calculateDistance(forehead, chin, canvasElement.width, canvasElement.height);
-                
-                // 3. Hut-Dimensionen berechnen
-                const hatWidth = headWidth * 1.6;        // Etwas breiter als der Kopf
-                const hatHeight = hatWidth * 0.6;        // Proportional zur Breite
-                
-                // 4. Hut-Position berechnen
-                // X-Position: Mittig zwischen den Schläfen
-                const hatCenterX = ((leftTemple.x + rightTemple.x) / 2) * canvasElement.width;
-                // Y-Position: Etwas über der Stirn, abhängig von der Kopfhöhe
-                const hatCenterY = forehead.y * canvasElement.height - hatHeight * 0.4;
+                const headHeight = calculateDistance(forehead, chin, canvasElement.width, canvasElement.height);                  // 3. Hut-Dimensionen berechnen (größer gemacht)
+                const hatWidth = headWidth * 2.2;        // Deutlich breiter als der Kopf
+                const hatHeight = hatWidth * 0.8;        // Proportional zur Breite                // 4. Hut-Position: FEST am Ankerpunkt fixiert
+                const hatCenterX = hatAnchorPoint.x * canvasElement.width;
+                const hatCenterY = hatAnchorPoint.y * canvasElement.height;
 
                 // 5. Tiefeneffekt: Hut wird kleiner wenn Kopf weiter weg ist
                 const depthFactor = Math.max(0.5, Math.min(1.5, headHeight / 200));
                 const adjustedHatWidth = hatWidth * depthFactor;
-                const adjustedHatHeight = hatHeight * depthFactor;
-
-                // 6. Hut zeichnen mit Transformation
+                const adjustedHatHeight = hatHeight * depthFactor;                // 6. Hut zeichnen - fest am Stirn-Ankerpunkt
                 canvasCtx.save();
                 
-                // Zum Hut-Zentrum verschieben
+                // Zum festen Ankerpunkt verschieben
                 canvasCtx.translate(hatCenterX, hatCenterY);
                 
-                // Rotation anwenden (gespiegelt für die gespiegelte Canvas)
-                canvasCtx.rotate(-eyeAngle);
+                // Horizontale Rotation (Links-/Rechts-Neigung)
+                canvasCtx.rotate(eyeAngle);
                 
-                // Hut zeichnen (zentriert um den Transformationspunkt)
+                // Minimale vertikale Perspektive - nur zur visuellen Verbesserung
+                const perspectiveScale = 1 + Math.sin(headTiltVertical) * 0.05; // Sehr reduziert
+                const verticalSquash = 1 - Math.abs(Math.sin(headTiltVertical)) * 0.1; // Sehr reduziert
+                
+                canvasCtx.scale(perspectiveScale, verticalSquash);
+                
+                // Hut zeichnen - der Ankerpunkt ist das Zentrum der Hut-Unterseite
                 canvasCtx.drawImage(
                     hatImage,
                     -adjustedHatWidth / 2,
-                    -adjustedHatHeight / 2,
+                    -adjustedHatHeight, // Hut ÜBER dem Ankerpunkt, nicht zentriert
                     adjustedHatWidth,
                     adjustedHatHeight
                 );
                 
-                canvasCtx.restore();
-
-                // Debug-Information (optional - kann entfernt werden)
+                canvasCtx.restore();                // Debug-Information (optional - kann entfernt werden)
                 if (false) { // Setzen Sie auf true für Debug-Anzeige
                     canvasCtx.save();
                     canvasCtx.strokeStyle = 'red';
@@ -286,11 +337,16 @@
                         canvasCtx.arc(point.x * canvasElement.width, point.y * canvasElement.height, 3, 0, 2 * Math.PI);
                     });
                     
+                    // Ankerpunkt markieren (grün)
+                    canvasCtx.strokeStyle = 'lime';
+                    canvasCtx.lineWidth = 3;
+                    canvasCtx.arc(hatCenterX, hatCenterY, 5, 0, 2 * Math.PI);
+                    
                     canvasCtx.stroke();
                     canvasCtx.restore();
                 }
 
-                updateStatus(`✅ Gesicht erkannt - Hut platziert (Winkel: ${(eyeAngle * 180 / Math.PI).toFixed(1)}°)`);
+                updateStatus(`✅ Gesicht erkannt - Hut platziert (H: ${(eyeAngle * 180 / Math.PI).toFixed(1)}°, V: ${(headTiltVertical * 180 / Math.PI).toFixed(1)}°)`);
             } else {
                 updateStatus('🔍 Suche nach Gesicht...');
             }
