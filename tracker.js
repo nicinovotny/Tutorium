@@ -21,12 +21,7 @@ faceMesh.setOptions({
 });
 
 faceMesh.onResults((results) => {
-  canvasCtx.save();
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-  // Kamera gespiegelt zeichnen
-  canvasCtx.translate(canvasElement.width, 0);
-  canvasCtx.scale(-1, 1);
   canvasCtx.drawImage(
     results.image,
     0,
@@ -35,7 +30,6 @@ faceMesh.onResults((results) => {
     canvasElement.height
   );
 
-  // Gesichtserkennung und Hut zeichnen
   if (results.multiFaceLandmarks.length > 0) {
     const landmarks = results.multiFaceLandmarks[0];
 
@@ -54,8 +48,6 @@ faceMesh.onResults((results) => {
 
     canvasCtx.drawImage(hatImage, x, y, hatWidth, hatHeight);
   }
-
-  canvasCtx.restore();
 });
 
 const camera = new Camera(videoElement, {
