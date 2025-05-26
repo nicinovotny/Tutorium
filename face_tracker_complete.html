@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistische Hut-Platzierung mit MediaPipe</title>
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            margin: 10px 0;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            overflow: hidden;
+            background: #000;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none; /* Video wird versteckt, nur Canvas wird angezeigt */
+        }
+
+        #canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Gespiegelt für natürliche Selfie-Ansicht */
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            font-size: 1.2em;
+            z-index: 10;
+        }
+
+        .loading.hidden {
+            display: none;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .status {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 0.9em;
+            margin-top: 15px;
+        }
+
+        @media (max-width: 700px) {
+            .camera-container {
+                width: 90vw;
+                height: calc(90vw * 0.75);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎓 Virtueller Studentenhut</h1>
+        <p>Bewegen Sie Ihren Kopf und sehen Sie, wie der Hut realistisch mitfolgt!</p>
+    </div>
+
+    <div class="camera-container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <div>Kamera wird geladen...</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div id="status" class="status">Initialisierung...</div>
+    </div>
+
+    <!-- MediaPipe CDN Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+    <script>
+        // DOM-Elemente
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingElement = document.getElementById('loading');
+        const statusElement = document.getElementById('status');
+
+        // Canvas-Dimensionen setzen
+        canvasElement.width = 640;
+        canvasElement.height = 480;
+
+        // Hut-Bild laden
+        const hatImage = new Image();
+        hatImage.src = 'hut.png';
+        
+        let isHatLoaded = false;
+        let isCameraReady = false;
+        let isFaceMeshReady = false;
+
+        // Status-Updates
+        function updateStatus(message) {
+            statusElement.textContent = message;
+        }
+
+        // Prüfen ob alles geladen ist
+        function checkIfReady() {
+            if (isHatLoaded && isCameraReady && isFaceMeshReady) {
+                loadingElement.classList.add('hidden');
+                updateStatus('✅ Bereit! Schauen Sie in die Kamera.');
+            }
+        }
+
+        // Hut-Bild Event-Handler
+        hatImage.onload = () => {
+            isHatLoaded = true;
+            updateStatus('Hut-Bild geladen...');
+            checkIfReady();
+        };
+
+        hatImage.onerror = () => {
+            updateStatus('❌ Fehler: hut.png konnte nicht geladen werden!');
+        };
+
+        // MediaPipe Face Mesh initialisieren
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+
+        // Face Mesh Optionen für optimale Performance und Genauigkeit
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        // Hilfsfunktion: Winkel zwischen zwei Punkten berechnen
+        function calculateAngle(point1, point2) {
+            const dx = point2.x - point1.x;
+            const dy = point2.y - point1.y;
+            return Math.atan2(dy, dx);
+        }
+
+        // Hilfsfunktion: Distanz zwischen zwei Punkten berechnen
+        function calculateDistance(point1, point2, canvasWidth, canvasHeight) {
+            const dx = (point1.x - point2.x) * canvasWidth;
+            const dy = (point1.y - point2.y) * canvasHeight;
+            return Math.sqrt(dx * dx + dy * dy);
+        }        // Hauptfunktion für Face Mesh Ergebnisse
+        faceMesh.onResults((results) => {
+            // Canvas leeren 
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Video gespiegelt zeichnen (für natürliche Selfie-Ansicht)
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            
+            // Wichtig: Das Originalvideo-Element verwenden, nicht results.image
+            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            }
+
+            // Gesichtserkennung und Hut-Platzierung
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // Wichtige Gesichtspunkte definieren
+                const forehead = landmarks[10];          // Stirnmitte (Hauptankerpunkt)
+                const leftTemple = landmarks[234];       // Linke Schläfe
+                const rightTemple = landmarks[454];      // Rechte Schläfe
+                const leftEyeOuter = landmarks[33];      // Äußerer linker Augenwinkel
+                const rightEyeOuter = landmarks[263];    // Äußerer rechter Augenwinkel
+                const noseTip = landmarks[1];            // Nasenspitze
+                const chin = landmarks[152];             // Kinn
+
+                // 1. Kopfneigung berechnen (für Hut-Rotation)
+                const eyeAngle = calculateAngle(leftEyeOuter, rightEyeOuter);
+                
+                // 2. Kopfgröße bestimmen (für Hut-Skalierung)
+                const headWidth = calculateDistance(leftTemple, rightTemple, canvasElement.width, canvasElement.height);
+                const headHeight = calculateDistance(forehead, chin, canvasElement.width, canvasElement.height);
+                
+                // 3. Hut-Dimensionen berechnen
+                const hatWidth = headWidth * 1.6;        // Etwas breiter als der Kopf
+                const hatHeight = hatWidth * 0.6;        // Proportional zur Breite
+                
+                // 4. Hut-Position berechnen
+                // X-Position: Mittig zwischen den Schläfen
+                const hatCenterX = ((leftTemple.x + rightTemple.x) / 2) * canvasElement.width;
+                // Y-Position: Etwas über der Stirn, abhängig von der Kopfhöhe
+                const hatCenterY = forehead.y * canvasElement.height - hatHeight * 0.4;
+
+                // 5. Tiefeneffekt: Hut wird kleiner wenn Kopf weiter weg ist
+                const depthFactor = Math.max(0.5, Math.min(1.5, headHeight / 200));
+                const adjustedHatWidth = hatWidth * depthFactor;
+                const adjustedHatHeight = hatHeight * depthFactor;
+
+                // 6. Hut zeichnen mit Transformation
+                canvasCtx.save();
+                
+                // Zum Hut-Zentrum verschieben
+                canvasCtx.translate(hatCenterX, hatCenterY);
+                
+                // Rotation anwenden (gespiegelt für die gespiegelte Canvas)
+                canvasCtx.rotate(-eyeAngle);
+                
+                // Hut zeichnen (zentriert um den Transformationspunkt)
+                canvasCtx.drawImage(
+                    hatImage,
+                    -adjustedHatWidth / 2,
+                    -adjustedHatHeight / 2,
+                    adjustedHatWidth,
+                    adjustedHatHeight
+                );
+                
+                canvasCtx.restore();
+
+                // Debug-Information (optional - kann entfernt werden)
+                if (false) { // Setzen Sie auf true für Debug-Anzeige
+                    canvasCtx.save();
+                    canvasCtx.strokeStyle = 'red';
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.beginPath();
+                    
+                    // Wichtige Punkte markieren
+                    [forehead, leftTemple, rightTemple, leftEyeOuter, rightEyeOuter].forEach(point => {
+                        canvasCtx.arc(point.x * canvasElement.width, point.y * canvasElement.height, 3, 0, 2 * Math.PI);
+                    });
+                    
+                    canvasCtx.stroke();
+                    canvasCtx.restore();
+                }
+
+                updateStatus(`✅ Gesicht erkannt - Hut platziert (Winkel: ${(eyeAngle * 180 / Math.PI).toFixed(1)}°)`);
+            } else {
+                updateStatus('🔍 Suche nach Gesicht...');
+            }
+
+            canvasCtx.restore();
+        });
+
+        // Kamera initialisieren
+        async function initializeCamera() {
+            try {
+                updateStatus('Kamerazugriff wird angefordert...');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: 640,
+                        height: 480,
+                        facingMode: 'user' // Frontkamera bevorzugen
+                    }
+                });
+
+                videoElement.srcObject = stream;
+                  videoElement.onloadedmetadata = () => {
+                    videoElement.play(); // Sicherstellen, dass das Video abgespielt wird
+                    isCameraReady = true;
+                    updateStatus('Kamera bereit...');
+                    checkIfReady();
+                    
+                    // Warten bis das Video tatsächlich läuft
+                    videoElement.onplaying = () => {
+                        startProcessing();
+                    };
+                };
+
+            } catch (error) {
+                console.error('Kamera-Fehler:', error);
+                updateStatus('❌ Kamerazugriff verweigert oder nicht verfügbar');
+                loadingElement.querySelector('div:last-child').textContent = 
+                    'Bitte erlauben Sie den Kamerazugriff und laden Sie die Seite neu.';
+            }
+        }        // Video-Verarbeitung starten
+        function startProcessing() {
+            if (!isCameraReady || !isFaceMeshReady) return;
+
+            const processFrame = async () => {
+                if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+                    await faceMesh.send({ image: videoElement });
+                }
+                requestAnimationFrame(processFrame);
+            };
+
+            processFrame();
+        }
+
+        // MediaPipe initialisieren (ohne explizites initialize() - das macht Face Mesh automatisch)
+        // Face Mesh ist sofort nach der Erstellung bereit
+        isFaceMeshReady = true;
+        updateStatus('MediaPipe Face Mesh geladen...');
+        checkIfReady();
+
+        // Anwendung starten
+        window.addEventListener('load', () => {
+            initializeCamera();
+        });
+
+        // Error-Handler für unerwartete Fehler
+        window.addEventListener('error', (event) => {
+            console.error('Anwendungsfehler:', event.error);
+            updateStatus('❌ Ein unerwarteter Fehler ist aufgetreten');
+        });
+    </script>
+</body>
+</html>
