@@ -147,8 +147,8 @@
 
     <div class="filter-buttons">
         <button class="filter-btn active" onclick="changeFilter('hut.png', this)">🎓 Studentenhut</button>
-        <button class="filter-btn" onclick="changeFilter('alex.png', this)">🤖 Alex</button>
-        <button class="filter-btn" onclick="changeFilter('biber.png', this)">👑 Biber</button>
+        <button class="filter-btn" onclick="changeFilter('Rahmen.png', this)">Rahmen</button>
+        <button class="filter-btn" onclick="changeFilter('Brille.png', this)">Sonnenbrille</button>
     </div>
 
     <div class="camera-container">
@@ -179,7 +179,7 @@
 
         // Canvas-Dimensionen setzen
         canvasElement.width = 640;
-        canvasElement.height = 480;        // Hut-Bild laden
+        canvasElement.height = 480;        // Filter-Bild laden
         const hatImage = new Image();
         hatImage.src = 'hut.png';
         
@@ -213,10 +213,10 @@
             }
         }
 
-        // Hut-Bild Event-Handler
+        // Filter-Bild Event-Handler
         hatImage.onload = () => {
             isHatLoaded = true;
-            updateStatus('Hut-Bild geladen...');
+            updateStatus('Filter-Bild geladen...');
             checkIfReady();
         };        hatImage.onerror = () => {
             updateStatus(`❌ Fehler: ${currentFilter} konnte nicht geladen werden!`);
@@ -247,6 +247,63 @@
             const dx = (point1.x - point2.x) * canvasWidth;
             const dy = (point1.y - point2.y) * canvasHeight;
             return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Filter-spezifische Konfiguration
+        function getFilterConfiguration(filterName, landmarks, canvasWidth, canvasHeight) {
+            const forehead = landmarks[10];
+            const leftTemple = landmarks[234];
+            const rightTemple = landmarks[454];
+            const leftEyeCenter = landmarks[468];
+            const rightEyeCenter = landmarks[473];
+            const chin = landmarks[152];
+            const headWidth = calculateDistance(leftTemple, rightTemple, canvasWidth, canvasHeight);
+            const headHeight = calculateDistance(forehead, chin, canvasWidth, canvasHeight);
+            
+            switch (filterName) {
+                case 'Brille.png':
+                    // Brille: PNG-Unterseite = Augenhöhe, Breite gut, Höhe gestreckt, weitere 5% höher positioniert (insgesamt 15% höher)
+                    const eyeCenterY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
+                    const glassesAnchorX = (leftEyeCenter.x + rightEyeCenter.x) / 2;
+                    // Weitere 5% höher: von der Augenhöhe 15% nach oben verschieben (10% + 5%)
+                    const glassesAnchorY = eyeCenterY - (headHeight * 0.15 / canvasHeight);
+                    return {
+                        anchorPoint: { x: glassesAnchorX, y: glassesAnchorY },
+                        width: headWidth * 2.25, // Breite bleibt gut: 50% größer
+                        height: headWidth * 2.25 * 0.6, // Höhe gestreckt: 0.4 → 0.6 (50% höher)
+                        offsetY: -headWidth * 2.25 * 0.3 // Y-Offset entsprechend angepasst
+                    };
+                    
+                case 'Rahmen.png':
+                    // Rahmen: PNG-Unterseite = weitere 5% nach unten (insgesamt 15% unter Kinn)
+                    const frameAnchorX = (leftTemple.x + rightTemple.x) / 2;
+                    const frameWidth = headWidth * 5.6; // 4x vergrößert: 1.4 * 4 = 5.6
+                    const frameHeight = headHeight * 5.2; // 4x vergrößert: 1.3 * 4 = 5.2
+                    // Weitere 5% nach unten: chin.y + 15% der Gesichtshöhe
+                    const frameAnchorY = chin.y + (headHeight * 0.15 / canvasHeight);
+                    return {
+                        anchorPoint: { x: frameAnchorX, y: frameAnchorY },
+                        width: frameWidth,
+                        height: frameHeight,
+                        offsetY: -frameHeight,
+                        maxDepthFactor: 1.2 // Tiefeneffekt begrenzen
+                    };
+                    
+                case 'hut.png':
+                default:
+                    // Hut: PNG-Unterseite = Stirnbereich (weitere 10% kleiner)
+                    const eyeCenterYHat = (leftEyeCenter.y + rightEyeCenter.y) / 2;
+                    const hatAnchorY = forehead.y + (eyeCenterYHat - forehead.y) * 0.38; // 5% tiefer: 0.33 → 0.38
+                    const hatAnchorX = (leftTemple.x + rightTemple.x) / 2;
+                    const hatWidth = headWidth * 5.346; // 10% kleiner: 5.94 * 0.9 = 5.346
+                    return {
+                        anchorPoint: { x: hatAnchorX, y: hatAnchorY },
+                        width: hatWidth,
+                        height: hatWidth * 0.8, // Proportional zur Breite
+                        offsetY: -hatWidth * 0.8,
+                        maxDepthFactor: 1.0 // Tiefeneffekt stark begrenzen - nicht größer als Kopf
+                    };
+            }
         }        // Hauptfunktion für Face Mesh Ergebnisse
         faceMesh.onResults((results) => {
             // Canvas leeren 
@@ -262,7 +319,7 @@
                 canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
             }
 
-            // Gesichtserkennung und Hut-Platzierung
+            // Gesichtserkennung und Filter-Platzierung
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];                // Wichtige Gesichtspunkte definieren
                 const forehead = landmarks[10];          // Stirnmitte (Hauptankerpunkt)
@@ -275,15 +332,8 @@
                 const noseTip = landmarks[1];            // Nasenspitze
                 const chin = landmarks[152];             // Kinn
 
-                // FIXER ANKERPUNKT: Mittleres Drittel zwischen Stirn und Augen
-                const eyeCenterY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
-                const hatAnchorY = forehead.y + (eyeCenterY - forehead.y) * 0.33; // 1/3 von Stirn zu Augen
-                const hatAnchorX = (leftTemple.x + rightTemple.x) / 2; // Mittig zwischen Schläfen
-                
-                const hatAnchorPoint = {
-                    x: hatAnchorX,
-                    y: hatAnchorY
-                };// 1. Kopfneigung berechnen (für Hut-Rotation)
+                // Filter-spezifische Konfiguration abrufen
+                const filterConfig = getFilterConfiguration(currentFilter, landmarks, canvasElement.width, canvasElement.height);// 1. Kopfneigung berechnen (für Hut-Rotation)
                 const eyeAngle = calculateAngle(leftEyeOuter, rightEyeOuter);
                 
                 // 2. Vor-/Rückwärts-Neigung des Kopfes berechnen
@@ -292,20 +342,20 @@
                 
                 // 3. Kopfgröße bestimmen (für Hut-Skalierung)
                 const headWidth = calculateDistance(leftTemple, rightTemple, canvasElement.width, canvasElement.height);
-                const headHeight = calculateDistance(forehead, chin, canvasElement.width, canvasElement.height);                  // 3. Hut-Dimensionen berechnen (größer gemacht)
-                const hatWidth = headWidth * 2.2;        // Deutlich breiter als der Kopf
-                const hatHeight = hatWidth * 0.8;        // Proportional zur Breite                // 4. Hut-Position: FEST am Ankerpunkt fixiert
-                const hatCenterX = hatAnchorPoint.x * canvasElement.width;
-                const hatCenterY = hatAnchorPoint.y * canvasElement.height;
+                const headHeight = calculateDistance(forehead, chin, canvasElement.width, canvasElement.height);                // 4. Filter-Position: Basierend auf Filter-Konfiguration
+                const filterCenterX = filterConfig.anchorPoint.x * canvasElement.width;
+                const filterCenterY = filterConfig.anchorPoint.y * canvasElement.height;
 
-                // 5. Tiefeneffekt: Hut wird kleiner wenn Kopf weiter weg ist
-                const depthFactor = Math.max(0.5, Math.min(1.5, headHeight / 200));
-                const adjustedHatWidth = hatWidth * depthFactor;
-                const adjustedHatHeight = hatHeight * depthFactor;                // 6. Hut zeichnen - fest am Stirn-Ankerpunkt
+                // 5. Tiefeneffekt: Filter wird kleiner wenn Kopf weiter weg ist (mit filterspezifischen Limits)
+                const baseFactor = Math.max(0.5, Math.min(1.5, headHeight / 200));
+                const maxFactor = filterConfig.maxDepthFactor || 1.5; // Standard: 1.5, filterspezifisch begrenzt
+                const depthFactor = Math.min(baseFactor, maxFactor);
+                const adjustedFilterWidth = filterConfig.width * depthFactor;
+                const adjustedFilterHeight = filterConfig.height * depthFactor;                // 6. Filter zeichnen - basierend auf Filter-Konfiguration
                 canvasCtx.save();
                 
-                // Zum festen Ankerpunkt verschieben
-                canvasCtx.translate(hatCenterX, hatCenterY);
+                // Zum Filter-Ankerpunkt verschieben
+                canvasCtx.translate(filterCenterX, filterCenterY);
                 
                 // Horizontale Rotation (Links-/Rechts-Neigung)
                 canvasCtx.rotate(eyeAngle);
@@ -316,13 +366,13 @@
                 
                 canvasCtx.scale(perspectiveScale, verticalSquash);
                 
-                // Hut zeichnen - der Ankerpunkt ist das Zentrum der Hut-Unterseite
+                // Filter zeichnen - der Ankerpunkt ist die Referenz für die Position
                 canvasCtx.drawImage(
                     hatImage,
-                    -adjustedHatWidth / 2,
-                    -adjustedHatHeight, // Hut ÜBER dem Ankerpunkt, nicht zentriert
-                    adjustedHatWidth,
-                    adjustedHatHeight
+                    -adjustedFilterWidth / 2,
+                    filterConfig.offsetY * depthFactor, // Filter-spezifischer Y-Offset
+                    adjustedFilterWidth,
+                    adjustedFilterHeight
                 );
                 
                 canvasCtx.restore();                // Debug-Information (optional - kann entfernt werden)
@@ -346,7 +396,7 @@
                     canvasCtx.restore();
                 }
 
-                updateStatus(`✅ Gesicht erkannt - Hut platziert (H: ${(eyeAngle * 180 / Math.PI).toFixed(1)}°, V: ${(headTiltVertical * 180 / Math.PI).toFixed(1)}°)`);
+                updateStatus(`✅ Gesicht erkannt - ${currentFilter} platziert (H: ${(eyeAngle * 180 / Math.PI).toFixed(1)}°, V: ${(headTiltVertical * 180 / Math.PI).toFixed(1)}°)`);
             } else {
                 updateStatus('🔍 Suche nach Gesicht...');
             }
